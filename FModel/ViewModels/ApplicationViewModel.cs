@@ -202,38 +202,19 @@ public class ApplicationViewModel : ViewModel
 
     public void Restart()
     {
-        var path = Path.GetFullPath(Environment.GetCommandLineArgs()[0]);
-        if (path.EndsWith(".dll"))
+        var app = (App)Application.Current;
+        var entry = Path.GetFullPath(Environment.GetCommandLineArgs()[0], UserSettings.StartupDirectory);
+        var executable = Environment.ProcessPath!;
+        var command = new ProcessStartInfo(executable)
         {
-            new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "dotnet",
-                    Arguments = $"\"{path}\"",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = false,
-                    RedirectStandardError = false,
-                    CreateNoWindow = true
-                }
-            }.Start();
-        }
-        else if (path.EndsWith(".exe"))
-        {
-            new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = path,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = false,
-                    RedirectStandardError = false,
-                    CreateNoWindow = true
-                }
-            }.Start();
-        }
-
-        Application.Current.Shutdown();
+            WorkingDirectory = UserSettings.StartupDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        if (string.Equals(Path.GetFileNameWithoutExtension(executable), "dotnet", StringComparison.OrdinalIgnoreCase))
+            command.ArgumentList.Add(entry);
+        app.RestartCommand = command;
+        app.Shutdown();
     }
 
     public async Task UpdateProvider(bool isLaunch)

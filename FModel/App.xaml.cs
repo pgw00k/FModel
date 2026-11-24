@@ -27,6 +27,8 @@ namespace FModel;
 /// </summary>
 public partial class App
 {
+    internal System.Diagnostics.ProcessStartInfo RestartCommand { get; set; }
+
     [DllImport("kernel32.dll")]
     private static extern bool AttachConsole(int dwProcessId);
 
@@ -44,7 +46,7 @@ public partial class App
         try
         {
             UserSettings.Default = JsonConvert.DeserializeObject<UserSettings>(
-                File.ReadAllText(UserSettings.FilePath), JsonNetSerializer.SerializerSettings);
+                File.ReadAllText(UserSettings.FilePath), JsonNetSerializer.SerializerSettings) ?? new UserSettings();
         }
         catch
         {
@@ -54,7 +56,9 @@ public partial class App
         var createMe = false;
         if (!Directory.Exists(UserSettings.Default.OutputDirectory))
         {
-            var currentDir = AppContext.BaseDirectory;
+            var currentDir = UserSettings.UsesLocalProfile
+                ? Path.GetDirectoryName(UserSettings.FilePath)!
+                : AppContext.BaseDirectory;
             try
             {
                 var outputDir = Directory.CreateDirectory(Path.Combine(currentDir, "Output"));
@@ -67,7 +71,7 @@ public partial class App
             }
             catch (UnauthorizedAccessException exception)
             {
-                throw new Exception("FModel cannot create the output directory where it is currently located. Please move FModel.exe to a different location.", exception);
+                throw new Exception($"FModel cannot create its output directory under '{currentDir}'.", exception);
             }
         }
 
@@ -107,7 +111,6 @@ public partial class App
             UserSettings.Default.ModelDirectory = Path.Combine(UserSettings.Default.OutputDirectory, "Exports");
         }
 
-        Directory.CreateDirectory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FModel"));
         Directory.CreateDirectory(Path.Combine(UserSettings.Default.OutputDirectory, "Backups"));
         if (createMe) Directory.CreateDirectory(Path.Combine(UserSettings.Default.OutputDirectory, "Exports"));
         Directory.CreateDirectory(Path.Combine(UserSettings.Default.OutputDirectory, "Logs"));
@@ -153,6 +156,7 @@ public partial class App
 
         CacheManager.MigrateLegacyFiles();
         Log.Information("Version {Version} ({CommitId})", Constants.APP_VERSION, Constants.APP_COMMIT_ID);
+        Log.Information("Settings file: {SettingsFile}", UserSettings.FilePath);
         Log.Information("{OS}", GetOperatingSystemProductName());
         Log.Information("{RuntimeVer}", RuntimeInformation.FrameworkDescription);
         Log.Information("Culture {SysLang}", CultureInfo.CurrentCulture);
@@ -168,6 +172,8 @@ public partial class App
         Log.Information("––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––");
         Log.CloseAndFlush();
         UserSettings.Save();
+        // 新实例须在退出保存完成后读取配置，尤其是修改游戏目录所触发的重启。
+        if (RestartCommand != null) System.Diagnostics.Process.Start(RestartCommand);
         Environment.Exit(0);
     }
 

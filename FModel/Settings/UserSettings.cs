@@ -22,10 +22,32 @@ public sealed class UserSettings : ViewModel
 #if DEBUG
     public bool SuppressViewerLogs { get; set; }
 
-    public static readonly string FilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FModel", "AppSettings_Debug.json");
+    private const string SettingsFileName = "AppSettings_Debug.json";
 #else
-    public static readonly string FilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FModel", "AppSettings.json");
+    private const string SettingsFileName = "AppSettings.json";
 #endif
+
+    // 启动时固定路径，文件对话框和运行中的其他实例不改变本进程的保存目标。
+    internal static readonly string StartupDirectory = Environment.CurrentDirectory;
+    private static readonly string GlobalFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FModel", SettingsFileName);
+    public static readonly string FilePath = ResolveSettingsPath();
+    internal static bool UsesLocalProfile => !string.Equals(FilePath, GlobalFilePath, StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveSettingsPath()
+    {
+        foreach (var directory in new[] { StartupDirectory, AppContext.BaseDirectory })
+        {
+            var path = Path.Combine(directory, SettingsFileName);
+            if (File.Exists(path)) return path;
+#if DEBUG
+            // 便携项目可使用发行版同名配置，也可以在同一目录为调试版分别设置。
+            path = Path.Combine(directory, "AppSettings.json");
+            if (File.Exists(path)) return path;
+#endif
+        }
+        return GlobalFilePath;
+    }
 
     static UserSettings()
     {
@@ -36,8 +58,25 @@ public sealed class UserSettings : ViewModel
     public static void Save()
     {
         if (!_bSave || Default == null) return;
-        Default.PerDirectory[Default.CurrentDir.GameDirectory] = Default.CurrentDir;
-        File.WriteAllText(FilePath, JsonConvert.SerializeObject(Default, Formatting.Indented));
+        if (Default.CurrentDir?.GameDirectory is { } gameDirectory)
+            Default.PerDirectory[gameDirectory] = Default.CurrentDir;
+        WriteProfile(JsonConvert.SerializeObject(Default, Formatting.Indented));
+    }
+
+    private static void WriteProfile(string json)
+    {
+        var directory = Path.GetDirectoryName(FilePath)!;
+        Directory.CreateDirectory(directory);
+        var temporary = Path.Combine(directory, Path.GetRandomFileName());
+        try
+        {
+            File.WriteAllText(temporary, json);
+            File.Move(temporary, FilePath, true);
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
     }
 
     public static void Delete()
@@ -45,7 +84,9 @@ public sealed class UserSettings : ViewModel
         if (File.Exists(FilePath))
         {
             _bSave = false;
-            File.Delete(FilePath);
+            // 本地重置仍保留本地配置入口，重启后继续在同一工程设置。
+            if (UsesLocalProfile) WriteProfile("{}");
+            else File.Delete(FilePath);
         }
     }
 
